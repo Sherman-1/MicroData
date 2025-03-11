@@ -1,0 +1,6 @@
+mmseqs_tmp/
+SCOPe_database/
+**/*.tsv
+**/*.fasta
+**/*.faa
+**/__pycache__/

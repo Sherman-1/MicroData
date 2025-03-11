@@ -8,7 +8,7 @@ import argparse
 
 
 class MMseqs2:
-    def __init__(self, threads, mmseqs2_path='/opt/homebrew/bin/mmseqs', cleanup=True):
+    def __init__(self, threads, mmseqs2_path, cleanup=True):
 
         self.mmseqs2_path = mmseqs2_path
         self.threads = threads
@@ -78,6 +78,47 @@ class MMseqs2:
         representatives_fasta = {k: full_fasta[k] for k in representatives}
         
         return representatives_fasta
+    
+    def fasta2representative_mobidb(self, fasta_file : Path, cov : float, iden : float, cov_mode : int = 0) -> dict:
+
+        self.createdb(fasta_file)
+        self.cluster(coverage=cov, identity=iden, cov_mode=cov_mode)
+        self.createtsv()
+
+        priority = {"curated": 3, "derived": 2, "homology": 1, "predicted" : 0}
+
+        clusters = {}
+        with open(self.dir / "result_seq_clu.tsv") as tsv:
+            
+            for line in tsv.readlines():
+                representative, member = line.split()
+                if representative not in clusters:
+                    clusters[representative] = list()
+                clusters[representative].append(member)
+                clusters[representative].append(representative) # representative is also a member of its own cluster 
+
+        representatives = list() # Not a set, we expect MMseqs to only allocate each sequence once in one cluster
+        for _, members in clusters.items():
+            if len(members) == 1:
+                representatives.append(members[0])
+            else:
+                best_member = members[0]
+                for member in members[1:]:
+                    if priority[member.split("|")[1]] > priority[best_member.split("|")[1]]:
+                        best_member = member
+                    elif priority[member.split("|")[1]] == priority[best_member.split("|")[1]]:
+                        member_len = int(member.split("|")[2].split("-")[1]) - int(member.split("|")[2].split("-")[0])
+                        best_member_len = int(best_member.split("|")[2].split("-")[1]) - int(best_member.split("|")[2].split("-")[0])
+                        if member_len > best_member_len:
+                            best_member = member
+                representatives.append(best_member)
+
+
+        full_fasta = SeqIO.to_dict(SeqIO.parse(fasta_file, "fasta"))
+        representatives_fasta = {k: full_fasta[k] for k in representatives}
+
+        return representatives_fasta
+
 
 if __name__ == '__main__':
 
@@ -85,14 +126,15 @@ if __name__ == '__main__':
 
     parser.add_argument('--fasta', help='Path to the input FASTA file')
     parser.add_argument('--writing_dir', default = ".", help='Directory to write the representative sequences')
-    parser.add_argument('--cov', type=float, default = 0.5, help='Coverage threshold for clustering')
-    parser.add_argument('--iden', type=float, default = 0.5, help='Identity threshold for clustering')
+    parser.add_argument('--cov', type=float, default = 0.7, help='Coverage threshold for clustering')
+    parser.add_argument('--iden', type=float, default = 0.3, help='Identity threshold for clustering')
     parser.add_argument('--cov_mode', type=int, default=0, help='Coverage mode for clustering')
-    parser.add_argument('--threads', type=int, default=os.cpu_count() - 2, help='Number of threads to use')
+    parser.add_argument('--threads', type=int, default=4, help='Number of threads to use')
+    parser.add_argument('--cleanup', action='store_true', default=True, help='Cleanup intermediate files')
 
     args = parser.parse_args()
 
-    mmseqs2_api = MMseqs2(threads=args.threads, cleanup=True)
+    mmseqs2_api = MMseqs2(threads=args.threads, cleanup=args.cleanup)
     
     representatives = mmseqs2_api.fasta2representativeseq(args.fasta, args.cov, args.iden, args.cov_mode)
 
