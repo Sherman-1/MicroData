@@ -3,4 +3,13 @@ SCOPe_database/
 **/*.tsv
 **/*.fasta
 **/*.faa
+**/*.fa
+**/*.fna
+**/*.txt
+**/*.csv
+**/*.json
+**/*.xml
+**/*.png
+**/*.jpg
 **/__pycache__/
+

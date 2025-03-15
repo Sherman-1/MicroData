@@ -1,0 +1,10 @@
+[package]
+name = "pdb2fasta"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rayon = "1.7"
+regex = "1"
+once_cell = "1"
+clap = { version = "4.5.32", features = ["derive"] }

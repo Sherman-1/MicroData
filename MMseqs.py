@@ -51,6 +51,7 @@ class MMseqs2:
         command = f"{self.mmseqs2_path} createtsv {self.dir}/db {self.dir}/db {self.dir}/db_clu {self.dir}/{tsv_file}"
         self._run_command(command, log_file)
         if self.cleanup:
+            print("Cleaning up intermediate files")
             self._cleanup_intermediate_files(tsv_file)
 
     def _cleanup_intermediate_files(self, tsv_file):
@@ -131,10 +132,11 @@ if __name__ == '__main__':
     parser.add_argument('--cov_mode', type=int, default=0, help='Coverage mode for clustering')
     parser.add_argument('--threads', type=int, default=4, help='Number of threads to use')
     parser.add_argument('--cleanup', action='store_true', default=True, help='Cleanup intermediate files')
+    parser.add_argument('--mmseqs_path', default="mmseqs", help='Path to the MMseqs2 binary')
 
     args = parser.parse_args()
 
-    mmseqs2_api = MMseqs2(threads=args.threads, cleanup=args.cleanup)
+    mmseqs2_api = MMseqs2(threads=args.threads, cleanup=args.cleanup, mmseqs2_path=args.mmseqs_path)
     
     representatives = mmseqs2_api.fasta2representativeseq(args.fasta, args.cov, args.iden, args.cov_mode)
 
