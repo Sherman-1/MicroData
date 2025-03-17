@@ -11,5 +11,46 @@ SCOPe_database/
 **/*.xml
 **/*.png
 **/*.jpg
+**/*.jpeg
+**/*.log
 **/__pycache__/
 
+#### RUST ####
+**/target/
+**/tests/
+
+**/*.rs.bk
+**/*.rs.swp
+**/*.rmeta
+
+**/Cargo.lock
+**/.cargo/
+**/.cargo-lock.toml
+
+# Rust-specific editor/IDE files
+**/*.rs.bk
+**/*.swp
+**/*.swo
+**/*.swn
+
+
+
+# Binary outputs
+*.exe
+*.out
+*.dSYM/
+*.pdb
+*.so
+*.dll
+*.dylib
+
+# Rust debugging files
+debug/
+debug.log
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+*.swm

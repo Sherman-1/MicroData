@@ -126,6 +126,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--fasta', help='Path to the input FASTA file')
+    parser.add_argument('--output', help='Path to the output FASTA file')
     parser.add_argument('--writing_dir', default = ".", help='Directory to write the representative sequences')
     parser.add_argument('--cov', type=float, default = 0.7, help='Coverage threshold for clustering')
     parser.add_argument('--iden', type=float, default = 0.3, help='Identity threshold for clustering')
@@ -140,7 +141,8 @@ if __name__ == '__main__':
     
     representatives = mmseqs2_api.fasta2representativeseq(args.fasta, args.cov, args.iden, args.cov_mode)
 
-    SeqIO.write(representatives.values(), f"{args.writing_dir}/representative.fasta", "fasta")
+    SeqIO.write(representatives.values(), f"{args.writing_dir}/{args.output}", "fasta")
+    print(f"Representative sequences written to {args.output}")
     
     
 
