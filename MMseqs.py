@@ -8,7 +8,7 @@ import argparse
 
 
 class MMseqs2:
-    def __init__(self, threads, mmseqs2_path, cleanup=True):
+    def __init__(self, threads, mmseqs2_path = "mmseqs", cleanup=True):
 
         self.mmseqs2_path = mmseqs2_path
         self.threads = threads

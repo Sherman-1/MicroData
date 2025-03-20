@@ -7,7 +7,6 @@ import functools
 import inspect
 
 import re
-import os 
 
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
@@ -20,6 +19,15 @@ import concurrent.futures
 import polars as pl 
 from glob import glob 
 
+import sys
+import os
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from MMseqs import MMseqs2
+
+
+# Fix seed
+np.random.seed(66370)
 
 
 def log_on_exception(func):
@@ -72,6 +80,7 @@ class SlicedOrderedDict(OrderedDict):
         else:
             return OrderedDict.__getitem__(self, key)
 
+
 class OPMPDBStruct:
 
     def __init__(self, 
@@ -106,7 +115,7 @@ class OPMPDBStruct:
         return (f"PDBStruct(protein_name={self.protein_name}, sequences={self.sequences}, "
                 f"protein_length={self.protein_length})")
     
-    def analyze(self):
+    def analyze(self) -> dict:
 
         self._binarize_transmembrane()
         self._define_tm_segments()
@@ -283,17 +292,21 @@ class OPMPDBStruct:
                 continue
 
             sorted_res = sorted(self.CA[chain_id].keys())
+            log_messages.append(f"Chain {chain_id}: sorted_res = {sorted_res}")
             margin_mask = "".join('1' if self.CA[chain_id][res]["in_margin"] == "1" else '0' for res in sorted_res)
-            margin_mask = self._smooth_margin(margin_mask)
-            chain_seq = "".join(self.CA[chain_id][res]["res_name"] for res in sorted_res)
-            index_to_res = {i+1: res for i, res in enumerate(sorted_res)}
-            res_to_index = {res: i+1 for i, res in enumerate(sorted_res)}
-            
             log_messages.append(f"Chain {chain_id}: margin_mask = {margin_mask}")
+            margin_mask = self._smooth_margin(margin_mask)
+            log_messages.append(f"Chain {chain_id}: smoothed margin_mask = {margin_mask}")
+            chain_seq = "".join(self.CA[chain_id][res]["res_name"] for res in sorted_res)
+            log_messages.append(f"Chain {chain_id}: chain_seq = {chain_seq}")
+            index_to_res = {i+1: res for i, res in enumerate(sorted_res)}
+            log_messages.append(f"Chain {chain_id}: index_to_res = {index_to_res}")
+            res_to_index = {res: i+1 for i, res in enumerate(sorted_res)}
+            log_messages.append(f"Chain {chain_id}: res_to_index = {res_to_index}")
+
             
             num_segments = len(self.tm_segments[chain_id])
             for i, segment in enumerate(self.tm_segments[chain_id]):
-                # Convert core TM boundaries (tm_start, tm_end) from residue numbers to sequence positions.
 
                 log_messages.append(f"Segments : {segment}")
 
@@ -313,32 +326,40 @@ class OPMPDBStruct:
                 if desired_length <= current_length:
                     pos_elong_start = pos_tm_start
                     pos_elong_end = pos_tm_end
+                    log_messages.append(f"Chain {chain_id}, segment {i}: no elongation needed.")
                 else:
                     extra_needed = desired_length - current_length
                     upstream_extra = np.random.randint(0, extra_needed)
                     downstream_extra = extra_needed - upstream_extra
 
                     # --- BACKWARD EXTENSION ---
-                    # Which residues are in the margin before the segment ?
                     left_mask = margin_mask[:pos_tm_start] 
                     left_block = re.search(r"(1+)$", left_mask)
+                    log_messages.append(f"Chain {chain_id}, segment {i}: left_mask={left_mask}, left_block={left_block}")
                     if left_block:
-                        available_left = pos_tm_start - left_block.start()  # how many ones are available
+                        available_left = pos_tm_start - left_block.start()  # how many ones ( in margin residues ) are available
                         actual_upstream = min(available_left, upstream_extra)
+                        log_messages.append(f"Chain {chain_id}, segment {i}: available_left={available_left}, actual_upstream={actual_upstream}")
                     else:
                         actual_upstream = 0
-                    pos_elong_start = pos_tm_start - actual_upstream
+
+                    # Clamp pos_elong_start to a minimum of 1 
+                    pos_elong_start = max(1, pos_tm_start - actual_upstream)
                     
                     # --- FORWARD EXTENSION ---
-                    # Whihc ones are after ?
                     right_mask = margin_mask[pos_tm_end:]  
                     right_block = re.match(r"(1+)", right_mask)
+                    log_messages.append(f"Chain {chain_id}, segment {i}: right_mask={right_mask}, right_block={right_block}")
                     if right_block:
                         available_right = right_block.end()  
                         actual_downstream = min(available_right, downstream_extra)
+                        log_messages.append(f"Chain {chain_id}, segment {i}: available_right={available_right}, actual_downstream={actual_downstream}")
                     else:
                         actual_downstream = 0
-                    pos_elong_end = pos_tm_end + actual_downstream
+
+                    # Clamp pos_elong_end to at most the chain length
+                    pos_elong_end = min(len(chain_seq), pos_tm_end + actual_downstream)
+
 
                 # Map back from position in sequence index to absolute value of res
                 new_start = index_to_res.get(pos_elong_start, tm_start)
@@ -347,6 +368,8 @@ class OPMPDBStruct:
                 # Extract sequences.
                 full_seq = chain_seq[pos_elong_start - 1: pos_elong_end]  
                 core_seq = chain_seq[pos_tm_start - 1: pos_tm_end]        
+                log_messages.append(f"Chain {chain_id}, segment {i}: pos_tm_start={pos_tm_start}, pos_tm_end={pos_tm_end}, pos_elong_start={pos_elong_start}, pos_elong_end={pos_elong_end}, new_start={new_start}, new_end={new_end}, full_seq={full_seq}")
+                log_messages.append(f"Chain {chain_id}, segment {i}: full_seq={full_seq}, core_seq={core_seq}")
                 
                 fasta_key = f"{protein_name}_{chain_id}_{i+1}_elong"
                 fasta_key_short = f"{protein_name}_{chain_id}_{i+1}_short"
@@ -547,7 +570,6 @@ class OPMPDBParser:
                 self.log_messages.append(f"Ss: {secondary_structure}, Chain: {chain_id}, Res: {res_number}")
                 ss_dict[chain_id][res_number] = secondary_structure
 
-        # Update CA records with secondary structure informations 
         for chain_id, residues in self.pdb_struct.CA.items():
             for res_number, data in residues.items():
                 sec_struct = ss_dict.get(chain_id, {}).get(res_number, "O")
@@ -561,13 +583,6 @@ class OPMPDBParser:
         self.log_messages.append(f"{self.pdb_struct.protein_name} processed")
         self.log_messages.append(f"Chains found: {list(self.pdb_struct.CA.keys())}")
         self.log_messages.append(f"Pdb structure: {self.pdb_struct}")
-
-def write_fasta_records(seq_records, filename):
-    """
-    Write a list of SeqRecord objects to a FASTA file.
-    """
-    with open(filename, "w") as f:
-        SeqIO.write(seq_records, f, "fasta")
 
 
 def write_structures_to_pdb(structures, output_dir):
@@ -583,22 +598,17 @@ def write_structures_to_pdb(structures, output_dir):
     """
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    # Iterate over each chain.
     for chain_id, chain_struct in structures.items():
         for key, residue_dict in chain_struct.items():
             pdb_lines = []
-            # Sort residues by number
+            # We never know ...
             for res in sorted(residue_dict.keys()):
                 value = residue_dict[res]
-                # If the value is a dictionary, then we assume it maps atom numbers to atom lines.
                 if isinstance(value, dict):
-                    # Sort by atom number so that the atom lines are in order.
                     for atom_number in sorted(value.keys()):
                         pdb_lines.append(value[atom_number])
                 else:
-                    # If it's not a dictionary (e.g. a placeholder like "X"), we skip it.
                     continue
-            # Write the concatenated atom lines to a PDB file named after the key.
             output_file = os.path.join(output_dir, f"{key}.pdb")
             with open(output_file, "w") as f:
                 f.write("".join(pdb_lines))
@@ -617,20 +627,18 @@ def write_output_files(output_dict, fasta_output_dir, pdb_output_dir):
       fasta_output_dir (str): Directory where FASTA files will be written.
       pdb_output_dir (str): Directory where PDB files will be written.
     """
-    # Create output directories if they don't exist.
+
     if not os.path.exists(fasta_output_dir):
         os.makedirs(fasta_output_dir)
     if not os.path.exists(pdb_output_dir):
         os.makedirs(pdb_output_dir)
     
-    # Write FASTA files.
-    full_fasta_file = os.path.join(fasta_output_dir, "full_sequences.fasta")
+    full_fasta_file = os.path.join(fasta_output_dir, "elong_sequences.fasta")
     short_fasta_file = os.path.join(fasta_output_dir, "short_sequences.fasta")
-    write_fasta_records(output_dict["sequences"], full_fasta_file)
-    write_fasta_records(output_dict["sequences_shorts"], short_fasta_file)
+    SeqIO.write(output_dict["sequences"], full_fasta_file, "fasta")
+    SeqIO.write(output_dict["sequences_shorts"], short_fasta_file, "fasta")
     
-    # Write PDB files into separate subdirectories for full and short structures.
-    full_pdb_dir = os.path.join(pdb_output_dir, "full_structures")
+    full_pdb_dir = os.path.join(pdb_output_dir, "elong_structures")
     short_pdb_dir = os.path.join(pdb_output_dir, "short_structures")
     write_structures_to_pdb(output_dict["structures"], full_pdb_dir)
     write_structures_to_pdb(output_dict["structures_shorts"], short_pdb_dir)
@@ -680,14 +688,14 @@ def search_main_directory():
     main_directory = None
     for i in range(3): 
         backward = "../" * i
-        main_directory = Path(f"{backward}Peptides").resolve()
+        main_directory = Path(f"{backward}MicroData").resolve()
         if main_directory.exists():
             break
 
     if main_directory is None:
         raise FileNotFoundError("Peptide directory not found")
     
-    print(f"Working on the main directory : {main_directory}")
+    print(f"Working with main directory set as : {main_directory}")
 
 def get_paths():
 
@@ -723,18 +731,21 @@ def get_paths():
 
     """
 
-    metadata = (
+    opm_metadata = (
 
-        pl.read_csv("/Users/simonherman/Documents/I2BC/Peptides/input/proteins-2024-05-07.csv", separator = ",", infer_schema_length = 20000)
+        pl.read_csv("proteins-2025-03-17.csv", separator = ",", infer_schema_length = 20000)
             .with_columns(
                 pl.concat_str([
-                        pl.lit("/Users/simonherman/Documents/I2BC/Peptides/input/OPM"),
-                        pl.concat_str([pl.col("pdbid"), pl.lit(".pdb")], separator = "")           
+                        pl.lit("OPM/pdb"),
+                        pl.concat_str(
+                            [
+                                pl.col("pdbid").str.replace(r'^="([^"]+)"$', r'$1'), 
+                                pl.lit(".pdb")
+                            ], separator = "")           
                     ], separator = "/",
                 ).alias("pdb_path")
             )
     )
-
     ## FILTERS ## 
 
     # Transmembranes
@@ -747,15 +758,17 @@ def get_paths():
     polytopic_proteins = (pl.col("classtype_id") == 1) & (pl.col("thickness") >= 20)
 
     ## CREATING PATHS ##
+    bitopic_membranome = [ main_directory / "Transmembrane" / path for path in list(glob("./Membranome/*.pdb")) ]
+    bitopic_proteins = [ main_directory / "Transmembrane" / path for path in opm_metadata.filter(bitopic_proteins)["pdb_path"].to_list() ]
+    bitopic_peptides = [ main_directory / "Transmembrane" / path for path in opm_metadata.filter(bitopic_peptides)["pdb_path"].to_list() ]
+    polytopics = [ main_directory / "Transmembrane" / path for path in opm_metadata.filter(polytopic_proteins)["pdb_path"].to_list() ]
 
-    membranome = [ main_directory / path for path in list(glob("/Users/simonherman/Documents/I2BC/Peptides/input/Membranome/*.pdb")) ]
-    bitopic_proteins = [ main_directory / path for path in metadata.filter(bitopic_proteins)["pdb_path"].to_list() ]
-    bitopic_peptides = [ main_directory / path for path in metadata.filter(bitopic_peptides)["pdb_path"].to_list() ]
-    polytopics = [ main_directory / path for path in metadata.filter(polytopic_proteins)["pdb_path"].to_list() ]
+    if len(bitopic_membranome) == 0:
+        exit("OUTDATED MEMBRANOME DATABASE")
 
     tm_paths = {
         
-        "bitopic" : membranome + bitopic_proteins + bitopic_peptides,
+        "bitopic" : bitopic_membranome + bitopic_proteins + bitopic_peptides,
         "polytopic" : polytopics
 
     }
@@ -765,11 +778,14 @@ def get_paths():
 def main():
 
     master_output = {
+
         "sequences": [],
         "sequences_shorts": [],
         "structures": {},
         "structures_shorts": {}
     }
+
+    mmseqs = MMseqs2(threads = 16, cleanup=True)
 
     search_main_directory()
 
@@ -777,23 +793,27 @@ def main():
     bitopics = paths["bitopic"]
     polytopics = paths["polytopic"]
 
-    pdbs_list = bitopics + polytopics
+    pdbs_list = bitopics + polytopics # Fuse 
     total_files = len(pdbs_list)
 
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=10, max_tasks_per_child=1) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=16) as executor:
 
         results = list(tqdm(executor.map(process_pdb_file, pdbs_list), total=total_files, desc="Processing PDBs"))
 
     for data in results:
         merge_output(master_output, data)
 
-    fasta_output_dir = "all_fasta_outputs"
-    pdb_output_dir = "all_pdb_outputs"
-    write_output_files(master_output, fasta_output_dir, pdb_output_dir)
+    write_output_files(master_output, "transmembrane_full_fasta", "transmembrane_full_pdb")
+
+    short_representatives = mmseqs.fasta2representativeseq(fasta_file = "transmembrane_full_fasta/elong_sequences.fasta", cov = 0.7, iden = 0.3)
+    elongated_representatives = mmseqs.fasta2representativeseq(fasta_file = "transmembrane_full_fasta/short_sequences.fasta", cov = 0.7, iden = 0.3)
+
+    SeqIO.write([record for record in short_representatives.values()], "transmembrane_short_representatives.fasta", "fasta")
+    SeqIO.write([record for record in elongated_representatives.values()], "transmembrane_elongated_representatives.fasta", "fasta")
 
 if __name__ == "__main__":
-    main()
 
+    main()
 
     

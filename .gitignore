@@ -7,13 +7,21 @@ SCOPe_database/
 **/*.fna
 **/*.txt
 **/*.csv
+**/*.tsv
+**/*.parquet
 **/*.json
 **/*.xml
 **/*.png
 **/*.jpg
 **/*.jpeg
 **/*.log
+**/*.tar.gz
+**/*.zip
 **/__pycache__/
+
+**/Membranome/
+**/OPM/
+**/transmembrane*/
 
 #### RUST ####
 **/target/

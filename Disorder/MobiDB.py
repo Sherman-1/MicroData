@@ -1,4 +1,3 @@
-import os
 import requests
 import polars as pl 
 import re
@@ -9,6 +8,10 @@ from Bio import SeqIO
 
 from io import StringIO
 
+import sys
+import os
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from MMseqs import MMseqs2
 
 import random
@@ -353,7 +356,7 @@ def fetch_page(last_id=None):
         print(response.text)
         return None
 
-def update_dict_of_lists(target, source):
+def update_dict_of_lists(target : dict, source : dict):
     """
     Updates the target dict of lists by appending the values from the source dict.
     If a key does not exist in target, it is created.
@@ -368,7 +371,6 @@ def update_dict_of_lists(target, source):
 
     except Exception as e:
         print("Error updating dict of lists:", e)
-        print("Target:", target)
 
          
 def download_disprot_fasta(link):
@@ -389,17 +391,18 @@ def download_disprot_fasta(link):
     return fasta_iterable
 
 
-def cut_fasta_mobidb_style(fasta_iterable, min_length=20, max_length=100):
+def cut_fasta_random_chunks(fasta_iterable, min_length=20, max_length=100):
     """
-    Replicates the 'MobiDB-style' cutting approach on an iterable of SeqRecords.
-
-    For each sequence:
-      1. If length < min_length, skip it.
-      2. If min_length <= length <= max_length, keep it whole.
-      3. If length > max_length, split into consecutive chunks of size up to max_length.
-         - Each chunk must be at least min_length in length, or it is discarded.
+    Split sequences into random-sized chunks (each between min_length and max_length).
+    
+    Rules:
+      1. If length < min_length, skip.
+      2. If min_length <= length <= max_length, keep whole.
+      3. If length > max_length, cut into random-length chunks in [min_length, max_length].
+         - Each chunk is at least min_length in length.
+         - If the leftover is shorter than min_length, discard it.
     """
-
+    
     results = []
     for record in fasta_iterable:
         full_len = len(record.seq)
@@ -408,27 +411,34 @@ def cut_fasta_mobidb_style(fasta_iterable, min_length=20, max_length=100):
             continue
         
         if full_len <= max_length:
-            results.append(SeqRecord(record.seq, id=f"{str(record.id).split('|')[1]}|curated|1-{full_len}", description=""))
+            results.append(
+                SeqRecord(
+                    record.seq,
+                    id=f"{str(record.id).split('|')[1]}|curated|1-{full_len}",
+                    description=""
+                )
+            )
             continue
         
         chunk_start = 0
         while chunk_start < full_len:
-            chunk_end = chunk_start + max_length
-            if chunk_end > full_len:
-                chunk_end = full_len  
-            chunk_len = chunk_end - chunk_start
+            leftover = full_len - chunk_start
+            if leftover < min_length:
+                break
             
-            if chunk_len >= min_length:
-                sub_seq = record.seq[chunk_start:chunk_end]
-                new_record = SeqRecord(
-                    Seq(str(sub_seq)),
-                    id=f"{str(record.id).split('|')[1]}|curated|{chunk_start+1}-{chunk_end}",
-                    description=""
-                )
-                results.append(new_record)
+            chunk_size = random.randint(min_length, min(max_length, leftover))
+            chunk_end = chunk_start + chunk_size
+            
+            sub_seq = record.seq[chunk_start:chunk_end]
+            new_record = SeqRecord(
+                Seq(str(sub_seq)),
+                id=f"{str(record.id).split('|')[1]}|curated|{chunk_start+1}-{chunk_end}",
+                description=""
+            )
+            results.append(new_record)
             
             chunk_start = chunk_end
-        
+            
     return results
 
 def main():
@@ -481,6 +491,8 @@ def main():
             print("No more pages to fetch.")
             break
 
+        page_count += 1
+
         print(f"Found {len(proteins.get('header', []))} proteins and {len(microproteins.get('header', []))} microproteins so far.")
 
     print(f"Fetched {page_count} pages.")
@@ -495,7 +507,7 @@ def main():
     print_banner("disprot")
 
     disprot_iterable = download_disprot_fasta(disprot_url)
-    records = cut_fasta_mobidb_style(disprot_iterable)
+    records = cut_fasta_random_chunks(disprot_iterable)
 
 
     full_sequences = proteins_sequences + microproteins_sequences + records
@@ -504,7 +516,7 @@ def main():
 
     representatives = mmseqs2_api.fasta2representative_mobidb("disordered_sequences.fasta", cov = 0.7, iden = 0.3)
 
-    SeqIO.write(representatives.values(), "representative_sequences.fasta", "fasta")
+    SeqIO.write(representatives.values(), "representative_disordered_sequences.fasta", "fasta")
 
 if __name__ == "__main__":
 

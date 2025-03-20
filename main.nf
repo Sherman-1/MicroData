@@ -4,7 +4,6 @@ nextflow.enable.dsl=2
 // Include processes from processes.nf
 include { downloadSCOPe; foldseekClustering } from './processes.nf'
 
-// Optionally include other processes similarly...
 
 workflow {
     
